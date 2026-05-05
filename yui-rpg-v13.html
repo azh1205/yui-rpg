@@ -1415,6 +1415,7 @@ const SHOP_SERVICES=[
 ];
 
 let G={
+  seed:Math.random(),
   yui:{x:4,y:4,hp:100,maxHp:100,mp:50,maxMp:50,atk:8,def:4,spd:5,level:1,xp:0,xpNext:100,gold:50,kills:0,selectedSkill:0,hasRevive:false},
   bag:[{id:1,type:'potion',name:'Health Potion',icon:'\u{1F9EA}',qty:3,stats:{hp:30}},{id:2,type:'weapon',name:'Common Rusty Fork',icon:'\u2694',qty:1,stats:{atk:2},rarity:0}],
   equipment:{weapon:null,armor:null,gloves:null,boots:null},
@@ -1429,7 +1430,7 @@ let G={
 // SAVE/LOAD
 function saveGame(){
   try{
-    const d={yui:G.yui,bag:G.bag,equipment:G.equipment,log:G.log.slice(-80),rightTab:G.rightTab,currentZone:G.currentZone,achievements:G.achievements,npcStates:G.npcStates,timestamp:Date.now()};
+    const d={seed:G.seed,yui:G.yui,bag:G.bag,equipment:G.equipment,log:G.log.slice(-80),rightTab:G.rightTab,currentZone:G.currentZone,achievements:G.achievements,npcStates:G.npcStates,timestamp:Date.now()};
     localStorage.setItem(SAVE_KEY,JSON.stringify(d));
     G.lastSaveTime=Date.now();
     addLog('Game saved! \u{1F4BE}','save');
@@ -1443,6 +1444,7 @@ function loadGame(){
     if(!raw)return false;
     const d=JSON.parse(raw);
     if(!d.yui)return false;
+    G.seed=d.seed||Math.random();
     G.yui={...G.yui,...d.yui};
     G.bag=d.bag||[];
     G.equipment=d.equipment||{weapon:null,armor:null,gloves:null,boots:null};
@@ -1472,17 +1474,35 @@ setInterval(()=>{if(G.mode==='world')saveGame();},120000);
 setInterval(updateLastSaveTime,30000);
 
 // MAP
+function getSeededRNG(s) {
+  let state = s;
+  return function() {
+    state = (state * 1664525 + 1013904223) & 0xffffffff;
+    return (state >>> 0) / 0xffffffff;
+  };
+}
+
+function getStairPos(floorIdx) {
+  const rng = getSeededRNG(G.seed + floorIdx * 7919);
+  // Ensure stairs aren't too close to the edges
+  const x = Math.floor(rng() * (G.mapW - 10)) + 5;
+  const y = Math.floor(rng() * (G.mapH - 10)) + 5;
+  return { x, y };
+}
+
 function generateMap(){
   const w=G.mapW,h=G.mapH,m=[];
-  for(let y=0;y<h;y++){m.push([]);for(let x=0;x<w;x++){const r=Math.random();if(x===0||y===0||x===w-1||y===h-1)m[y].push(TILE.WALL);else if(r<0.12)m[y].push(TILE.TREE);else if(r<0.18)m[y].push(TILE.WATER);else m[y].push(TILE.FLOOR);}}
+  const rng = getSeededRNG(G.seed + 42);
+  for(let y=0;y<h;y++){m.push([]);for(let x=0;x<w;x++){const r=rng();if(x===0||y===0||x===w-1||y===h-1)m[y].push(TILE.WALL);else if(r<0.12)m[y].push(TILE.TREE);else if(r<0.18)m[y].push(TILE.WATER);else m[y].push(TILE.FLOOR);}}
   for(let y=2;y<=6;y++)for(let x=2;x<=9;x++)m[y][x]=TILE.HOME;
   m[3][8]=TILE.SHOP;
   for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){if(m[y][x]===TILE.WATER&&m[y][x-1]===TILE.FLOOR&&m[y][x+1]===TILE.FLOOR)m[y][x]=TILE.BRIDGE;}
   for(let x=1;x<w-1;x++){if(m[10][x]===TILE.TREE||m[10][x]===TILE.WATER)m[10][x]=TILE.FLOOR;}
   for(let y=1;y<h-1;y++){if(m[y][20]===TILE.TREE||m[y][20]===TILE.WATER)m[y][20]=TILE.FLOOR;}
   NPC_DEFS.forEach(n=>{m[n.y][n.x]=TILE.NPC;});
-  // ── Stair Down: place at (30,22) — visible south-east, reachable fast ──
-  const SD_X=30, SD_Y=22;
+  // ── Stair Down: deterministic position for Floor 0 to 1 connection ──
+  const pos = getStairPos(1);
+  const SD_X=pos.x, SD_Y=pos.y;
   // Clear 3x3 around stairs
   for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) m[SD_Y+dy][SD_X+dx]=TILE.FLOOR;
   m[SD_Y][SD_X]=TILE.STAIR_DOWN;
@@ -1492,12 +1512,14 @@ function generateMap(){
   for(let y=1;y<=SD_Y;y++) if(m[y][SD_X]!==TILE.STAIR_DOWN) m[y][SD_X]=TILE.FLOOR;
   m._stairDownX=SD_X; m._stairDownY=SD_Y;
   G.map=m;
+  G.floorMaps[0]=m;
   G.zones=[
     {name:'Home Base',x:2,y:2,w:8,h:5,heal:true,encounter:false},
     {name:'Forest Path',x:10,y:5,w:14,h:10,encounter:true},
     {name:'Dark Depths',x:24,y:15,w:15,h:14,encounter:true,harder:true},
     {name:'Crystal Caves',x:9,y:15,w:14,h:14,encounter:true,boss:true},
   ];
+  return m;
 }
 
 // CANVAS
@@ -2862,8 +2884,9 @@ function setupMobileControls(){
 // ==================== INIT PATCH ====================
 // INIT
 function init(){
-  generateMap();initCanvas();
   const loaded=loadGame();
+  if(!G.seed) G.seed = Math.random();
+  generateMap();initCanvas();
   if(loaded){
     if(G.yui.x<1)G.yui.x=4;if(G.yui.y<1)G.yui.y=4;
     addLog('Save loaded! Welcome back, Yui.','save');
@@ -3022,6 +3045,7 @@ saveGame = function(){
   // Store floor data in a sidecar key so it doesn't break existing saves
   try{
     localStorage.setItem(SAVE_KEY+'_floors', JSON.stringify({
+      seed: G.seed,
       floor: G.floor,
       bossDefeated: G.bossDefeated,
     }));
@@ -3058,13 +3082,12 @@ function getTileColor(tile, biome){
 // ── PROCEDURAL FLOOR GENERATOR ──
 function generateFloor(floorIdx){
   if(G.floorMaps[floorIdx]) return G.floorMaps[floorIdx]; // cached
+  if(floorIdx === 0) return generateMap();
 
   const biome = BIOMES[Math.min(floorIdx, BIOMES.length-1)];
   const w = G.mapW, h = G.mapH;
   const m = [];
-  const seed = floorIdx * 9973 + 12345;
-  let rngState = seed;
-  function rng(){ rngState = (rngState * 1664525 + 1013904223) & 0xffffffff; return (rngState >>> 0) / 0xffffffff; }
+  const rng = getSeededRNG(G.seed + floorIdx * 9973 + 12345);
 
   // Fill with biome-appropriate tiles
   for(let y=0;y<h;y++){
@@ -3081,7 +3104,7 @@ function generateFloor(floorIdx){
         if(r<0.10) tile=TILE.WALL;
         else if(r<0.24) tile=TILE.SAND;
         else if(r<0.26) tile=TILE.WATER; // oasis
-        if(rng()<0.04) tile=TILE.TREE; // cactus
+        if(r<0.04) tile=TILE.TREE; // cactus
       } else if(biome.id==='swamp'){
         if(r<0.06) tile=TILE.WALL;
         else if(r<0.16) tile=TILE.MUD;
@@ -3104,20 +3127,23 @@ function generateFloor(floorIdx){
   for(let x=1;x<w-1;x++) if(m[corridorY][x]!==TILE.LAVA) m[corridorY][x]=TILE.FLOOR;
   for(let y=1;y<h-1;y++) if(m[y][corridorX]!==TILE.LAVA) m[y][corridorX]=TILE.FLOOR;
 
-  // ── Stair Down (descend to next floor) — south-east quadrant ──
-  const sdx=Math.floor(w*0.75+rng()*5), sdy=Math.floor(h*0.7+rng()*5);
-  m[Math.min(sdy,h-2)][Math.min(sdx,w-2)] = TILE.STAIR_DOWN;
-  // Clear a small area around it
-  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
-    const ty=sdy+dy, tx=sdx+dx;
-    if(ty>0&&ty<h-1&&tx>0&&tx<w-1&&m[ty][tx]!==TILE.STAIR_DOWN) m[ty][tx]=TILE.FLOOR;
+  // ── Stair Down (descend to next floor) ──
+  const posDown = getStairPos(floorIdx + 1);
+  const sdx=posDown.x, sdy=posDown.y;
+  if (floorIdx < BIOMES.length - 1) {
+    m[sdy][sdx] = TILE.STAIR_DOWN;
+    // Clear a small area around it
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+      const ty=sdy+dy, tx=sdx+dx;
+      if(ty>0&&ty<h-1&&tx>0&&tx<w-1&&m[ty][tx]!==TILE.STAIR_DOWN) m[ty][tx]=TILE.FLOOR;
+    }
   }
 
   // ── Stair Up (return to previous floor) — only on floors > 0 ──
-  let sux=3, suy=3;
+  const posUp = getStairPos(floorIdx);
+  const sux=posUp.x, suy=posUp.y;
   if(floorIdx>0){
-    sux=Math.floor(w*0.15+rng()*4); suy=Math.floor(h*0.15+rng()*4);
-    m[Math.min(suy,h-2)][Math.min(sux,w-2)] = TILE.STAIR_UP;
+    m[suy][sux] = TILE.STAIR_UP;
     // Create Safe Haven (Home area) around Stair Up
     for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++){
       const ty=suy+dy, tx=sux+dx;
@@ -3144,20 +3170,20 @@ function generateFloor(floorIdx){
   m._stairDownX=sdx; m._stairDownY=sdy;
   m._stairUpX=sux; m._stairUpY=suy;
 
-  m._npcs = generateNPCsForFloor(floorIdx, m);
+  m._npcs = generateNPCsForFloor(floorIdx, m, rng);
 
   G.floorMaps[floorIdx] = m;
   return m;
 }
 
-function generateNPCsForFloor(floorIdx, m) {
+function generateNPCsForFloor(floorIdx, m, rng) {
   if (floorIdx === 0) return [];
   const npcs = [];
   const biome = BIOMES[floorIdx];
   const w = G.mapW, h = G.mapH;
 
   // Floor Guide
-  let pos = pickFloorTile({x:1, y:1, w:w-2, h:h-2});
+  let pos = pickFloorTile({x:1, y:1, w:w-2, h:h-2}, m, rng);
   npcs.push({
     id: `guide_${floorIdx}`,
     name: 'FLOOR GUIDE',
@@ -3174,7 +3200,7 @@ function generateNPCsForFloor(floorIdx, m) {
   m[pos.y][pos.x] = TILE.NPC;
 
   // Shadow Merchant (Hidden Shop)
-  pos = pickFloorTile({x:1, y:1, w:w-2, h:h-2});
+  pos = pickFloorTile({x:1, y:1, w:w-2, h:h-2}, m, rng);
   npcs.push({
     id: `shadow_merchant_${floorIdx}`,
     name: 'SHADOW MERCHANT',
@@ -3192,8 +3218,26 @@ function generateNPCsForFloor(floorIdx, m) {
   return npcs;
 }
 
+function pickFloorTile(zone, map, rng = Math.random) {
+  const m = map || G.map;
+  if (!m) return { x: zone.x + Math.floor(zone.w / 2), y: zone.y + Math.floor(zone.h / 2) };
+  const TILE_FLOOR = 1;
+  for (let tries = 0; tries < 60; tries++) {
+    const x = zone.x + 2 + Math.floor(rng() * (zone.w - 4));
+    const y = zone.y + 2 + Math.floor(rng() * (zone.h - 4));
+    if (m[y] && m[y][x] === TILE_FLOOR) return { x, y };
+  }
+  return { x: zone.x + Math.floor(zone.w / 2), y: zone.y + Math.floor(zone.h / 2) };
+}
+
 // ── FLOOR ZONES ──
 function getFloorZones(floorIdx){
+  if(floorIdx===0) return [
+    {name:'Home Base',x:2,y:2,w:8,h:5,heal:true,encounter:false},
+    {name:'Forest Path',x:10,y:5,w:14,h:10,encounter:true},
+    {name:'Dark Depths',x:24,y:15,w:15,h:14,encounter:true,harder:true},
+    {name:'Crystal Caves',x:9,y:15,w:14,h:14,encounter:true,boss:true},
+  ];
   const w=G.mapW, h=G.mapH;
   const biome=BIOMES[Math.min(floorIdx,BIOMES.length-1)];
   const m = G.floorMaps[floorIdx];
@@ -3216,24 +3260,25 @@ function goToFloor(targetFloor, spawnNearStairUp=false){
   G.zones = getFloorZones(targetFloor);
   G.currentZone = BIOMES[Math.min(targetFloor,BIOMES.length-1)].name;
 
-  // Spawn position
+  // Spawn position: move player to the stair they just came from
   if(spawnNearStairUp){
-    // When ascending, spawn near the STAIR_DOWN on the target floor (where we came from)
-    G.yui.x = (G.map._stairDownX || 4) + 1;
-    G.yui.y = (G.map._stairDownY || 4);
+    // When ascending, spawn at the STAIR_DOWN on the target floor
+    G.yui.x = G.map._stairDownX;
+    G.yui.y = G.map._stairDownY;
   } else {
-    // When descending, spawn near the STAIR_UP on the target floor
-    G.yui.x = (G.map._stairUpX || 3) + 1;
-    G.yui.y = (G.map._stairUpY || 3);
+    // When descending, spawn at the STAIR_UP on the target floor
+    G.yui.x = G.map._stairUpX;
+    G.yui.y = G.map._stairUpY;
   }
 
-  // Safety: ensure spawn tile is walkable
-  const safe=[[0,0],[1,0],[-1,0],[0,1],[0,-1],[2,0],[0,2]];
+  // Safety & Offset: Move player to a nearby walkable tile to avoid immediate re-trigger
+  const safe=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1],[2,0],[0,2]];
+  const walkableTiles = [TILE.FLOOR, TILE.BRIDGE, TILE.HOME, TILE.ICE, TILE.SAND, TILE.MUD, TILE.STAIR_UP, TILE.STAIR_DOWN];
   for(const [dx,dy] of safe){
     const nx=G.yui.x+dx, ny=G.yui.y+dy;
     if(nx>0&&ny>0&&nx<G.mapW&&ny<G.mapH){
       const t=G.map[ny][nx];
-      if(t===TILE.FLOOR||t===TILE.BRIDGE){G.yui.x=nx;G.yui.y=ny;break;}
+      if(walkableTiles.includes(t)){G.yui.x=nx;G.yui.y=ny;break;}
     }
   }
 
@@ -3250,7 +3295,7 @@ function goToFloor(targetFloor, spawnNearStairUp=false){
   updateUI();
 
   // Save floor to localstorage
-  try{localStorage.setItem(SAVE_KEY+'_floors',JSON.stringify({floor:G.floor,bossDefeated:G.bossDefeated}));}catch(e){}
+  try{localStorage.setItem(SAVE_KEY+'_floors',JSON.stringify({seed:G.seed,floor:G.floor,bossDefeated:G.bossDefeated}));}catch(e){}
 }
 
 // ── FLOOR TITLE CARD ──
@@ -3313,7 +3358,7 @@ victorySeq=function(){
   const e=G.currentEnemy;
   if(e&&e.isBoss){
     G.bossDefeated[e.floorIdx]=true;
-    try{localStorage.setItem(SAVE_KEY+'_floors',JSON.stringify({floor:G.floor,bossDefeated:G.bossDefeated}));}catch(err){}
+    try{localStorage.setItem(SAVE_KEY+'_floors',JSON.stringify({seed:G.seed,floor:G.floor,bossDefeated:G.bossDefeated}));}catch(err){}
     // Re-enable run button
     const runBtn=document.getElementById('btn-run');
     if(runBtn){runBtn.disabled=false;runBtn.style.opacity='';}
@@ -3665,6 +3710,7 @@ updateUI=function(){
     const raw=localStorage.getItem(SAVE_KEY+'_floors');
     if(raw){
       const d=JSON.parse(raw);
+      if(d.seed) G.seed=d.seed;
       if(typeof d.floor==='number') G.floor=d.floor;
       if(d.bossDefeated) G.bossDefeated=d.bossDefeated;
     }
@@ -4262,17 +4308,6 @@ victorySeq=function(){
     return G.zones.filter(z => z.encounter);
   }
 
-  function pickFloorTile(zone) {
-    // Pick a random walkable floor tile inside the zone
-    const TILE_FLOOR = 1;
-    for (let tries = 0; tries < 60; tries++) {
-      const x = zone.x + 2 + Math.floor(Math.random() * (zone.w - 4));
-      const y = zone.y + 2 + Math.floor(Math.random() * (zone.h - 4));
-      if (G.map[y] && G.map[y][x] === TILE_FLOOR) return { x, y };
-    }
-    return { x: zone.x + Math.floor(zone.w / 2), y: zone.y + Math.floor(zone.h / 2) };
-  }
-
   function spawnBossForZone(zone) {
     const existing = G.bosses.find(b => b.zone === zone.name);
     if (existing) {
@@ -4424,6 +4459,7 @@ victorySeq=function(){
   window.renderBossesOnMap = function() {
     const now = Date.now();
     G.bosses.forEach(boss => {
+      if (!G.zones.find(z => z.name === boss.zone)) return;
       const bx = boss.x * G.tileSize - G.camera.x;
       const by = boss.y * G.tileSize - G.camera.y;
       const ts = G.tileSize;
@@ -4605,6 +4641,7 @@ victorySeq=function(){
     const mw = 160, mh = 120, tw = mw / G.mapW, th = mh / G.mapH;
     G.bosses.forEach(boss => {
       if (!boss.alive) return;
+      if (!G.zones.find(z => z.name === boss.zone)) return;
       const t = Date.now() * 0.005;
       const alpha = 0.6 + 0.4 * Math.sin(t);
       mmCtx.globalAlpha = alpha;
@@ -5052,6 +5089,7 @@ victorySeq=function(){
 
   function saveSnapshot(){
     return {
+      seed:G.seed,
       yui:G.yui,
       bag:G.bag,
       equipment:G.equipment,
@@ -5070,6 +5108,7 @@ victorySeq=function(){
 
   function applyCloudSaveData(d){
     if(!d||!d.yui) throw new Error('Returned save is missing game data');
+    if(d.seed) G.seed=d.seed;
     G.yui={...G.yui,...d.yui};
     G.bag=d.bag||[];
     G.equipment=d.equipment||{weapon:null,armor:null,gloves:null,boots:null};
