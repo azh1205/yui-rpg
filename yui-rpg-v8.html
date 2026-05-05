@@ -2007,12 +2007,78 @@ function spawnFloater(text,x,y,color='#e86a7e',big=false){
 // Inject floater CSS
 (()=>{const s=document.createElement('style');s.textContent='.dmg-floater{animation:none;}.dmg-floater.big{font-size:13px!important;}';document.head.appendChild(s);})();
 
+function triggerSkillVisuals(skillId) {
+  const yui = document.getElementById('yui-sprite');
+  const enemy = document.getElementById('enemy-sprite');
+  const arena = document.getElementById('battle-arena');
+  if (!yui || !enemy || !arena) return;
+  const ar = arena.getBoundingClientRect();
+  const er = enemy.getBoundingClientRect();
+  const yr = yui.getBoundingClientRect();
+
+  const ex = er.left - ar.left + er.width/2;
+  const ey = er.top - ar.top + er.height/2;
+  const yx = yr.left - ar.left + yr.width/2;
+  const yy = yr.top - ar.top + yr.height/2;
+
+  if (skillId === 'bite') {
+    yui.style.transition = 'transform 0.2s';
+    yui.style.transform = 'translateX(60px) rotate(15deg)';
+    setTimeout(() => {
+      yui.style.transform = 'translateX(0) rotate(0deg)';
+      spawnParticles(ex, ey, '#ff4466', 15, 35);
+    }, 200);
+  } else if (skillId === 'memstrike') {
+    enemy.style.filter = 'invert(1) hue-rotate(180deg) brightness(1.5)';
+    for(let i=0; i<3; i++) {
+      setTimeout(() => spawnParticles(ex + (Math.random()-0.5)*30, ey + (Math.random()-0.5)*30, '#00ff66', 10, 40), i*100);
+    }
+    setTimeout(() => { enemy.style.filter = ''; }, 500);
+  } else if (skillId === 'guardrail') {
+    spawnParticles(yx, yy, '#44ccff', 25, 30);
+    yui.style.filter = 'drop-shadow(0 0 15px #44ccff) brightness(1.2)';
+    setTimeout(() => { yui.style.filter = ''; }, 1200);
+  } else if (skillId === 'codeblast') {
+    const flash = document.getElementById('flash');
+    if (flash) {
+      flash.style.background = 'white';
+      flash.style.opacity = '0.6';
+      setTimeout(() => { flash.style.opacity = '0'; flash.style.background = '#e86a7e'; }, 150);
+    }
+    spawnParticles(ex, ey, '#ffcc00', 50, 100);
+    spawnParticles(ex, ey, '#ffffff', 20, 60);
+    animateSprite('enemy-sprite');
+  } else if (skillId === 'heuristic') {
+    const colors = ['#ff4466', '#44ff66', '#4466ff', '#ffcc00', '#ff44ff'];
+    for (let i = 0; i < 8; i++) {
+      setTimeout(() => {
+        spawnParticles(ex + (Math.random()-0.5)*60, ey + (Math.random()-0.5)*60, colors[i%colors.length], 10, 30);
+        if(i%2===0) animateSprite('enemy-sprite');
+      }, i * 80);
+    }
+  } else if (skillId === 'overflow') {
+    for (let i = 0; i < 3; i++) {
+      setTimeout(() => {
+        spawnParticles(ex, ey, '#ffffff', 15, 40);
+        spawnParticles(ex, ey, '#7ec8e3', 10, 20);
+        animateSprite('enemy-sprite');
+      }, i * 250);
+    }
+  }
+}
+
 // Wrap battleAction to add floaters and sounds
 const _origBattleAction=battleAction;
 battleAction=function(action){
   // Intercept for sounds/floaters — delegate to original
   if(action==='attack')sfxAttack();
-  else if(action==='skill')sfxSkill();
+  else if(action==='skill') {
+    const sk = SKILL_DEFS[G.yui.selectedSkill];
+    if (sk && G.yui.mp >= sk.mpCost && G.yui.level >= sk.unlockLv) {
+      sfxSkill();
+      triggerSkillVisuals(sk.id);
+    }
+  }
   else if(action==='item')sfxHeal();
   else if(action==='run')sfxRun();
   _origBattleAction(action);
@@ -2061,18 +2127,20 @@ function spawnParticles(cx,cy,color,count=8,spread=30){
     });
   }
 }
-function updateParticles(W,H){
-  ctx.save();
+function updateParticles(pCtx,W,H,updateState=true){
+  pCtx.save();
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i];
-    p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life-=p.decay;
+    if(updateState){
+      p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life-=p.decay;
+    }
     if(p.life<=0){particles.splice(i,1);continue;}
-    ctx.globalAlpha=p.life;
-    ctx.fillStyle=p.color;
-    ctx.beginPath();ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);ctx.fill();
+    pCtx.globalAlpha=p.life;
+    pCtx.fillStyle=p.color;
+    pCtx.beginPath();pCtx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);pCtx.fill();
   }
-  ctx.restore();
-  ctx.globalAlpha=1;
+  pCtx.restore();
+  pCtx.globalAlpha=1;
 }
 
 // ==================== WORLD AMBIENCE ====================
@@ -2188,7 +2256,7 @@ render=function(){
   }
 
   // World particles
-  updateParticles(W,H);
+  updateParticles(ctx,W,H,true);
 
   renderMinimap();
 };
@@ -2225,6 +2293,8 @@ function animateBattle(){
     for(let i=0;i<6;i++){const a=Math.PI/3*i-Math.PI/6;bctx.lineTo(hx+16*Math.cos(a),hy+16*Math.sin(a));}
     bctx.closePath();bctx.stroke();
   }}
+  // Use updateState=false to prevent double decay if world loop is also running
+  updateParticles(bctx, W, H, G.mode === 'battle');
   requestAnimationFrame(animateBattle);
 }
 requestAnimationFrame(animateBattle);
@@ -3279,6 +3349,18 @@ window.addEventListener('load',init);
       showAchievement('Boss Slayer','Defeated a Zone Boss!');
     }
     _origVictorySeqBoss();
+  };
+
+  // Hook endBattle to ensure boss doesn't vanish if fleeing or defeated
+  const _origEndBattleBoss = endBattle;
+  window.endBattle = endBattle = function() {
+    if (G.currentEnemy && G.currentEnemy.isBoss) {
+      const boss = G.bosses.find(b => b.def && b.def.name === G.currentEnemy.name);
+      if (boss && boss.defeatedAt === null) {
+        boss.alive = true; // Restore boss to map
+      }
+    }
+    _origEndBattleBoss();
   };
 
   // Inject CSS for alert animation and boss glow
