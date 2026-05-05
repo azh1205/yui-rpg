@@ -1062,6 +1062,49 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
 }
 
 </style>
+
+
+<!-- === Coordinate HUD + Vibrant Stair Visibility Patch === -->
+<style>
+  #coord-hud{
+    position:absolute;
+    top:10px;
+    left:10px;
+    z-index:130;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 10px;
+    border:1px solid rgba(126,200,227,0.55);
+    border-radius:10px;
+    background:rgba(5,8,18,0.82);
+    color:var(--accent2);
+    font-family:'VT323',monospace;
+    font-size:17px;
+    letter-spacing:0.03em;
+    box-shadow:0 0 18px rgba(126,200,227,0.14), inset 0 0 12px rgba(126,200,227,0.06);
+    pointer-events:none;
+    backdrop-filter:blur(6px);
+    -webkit-backdrop-filter:blur(6px);
+  }
+  #coord-hud .coord-label{color:var(--muted);font-size:14px;text-transform:uppercase;}
+  #coord-hud .coord-value{color:#b8e986;text-shadow:0 0 10px rgba(184,233,134,0.35);}
+  @media(max-width:760px){
+    #coord-hud{
+      position:fixed;
+      top:116px;
+      left:10px;
+      right:auto;
+      z-index:145;
+      font-size:15px;
+      padding:4px 8px;
+      border-radius:9px;
+      background:rgba(5,8,18,0.72);
+    }
+    body.in-shop #coord-hud,
+    body.in-battle #coord-hud{display:none !important;}
+  }
+</style>
 </head>
 <body>
 <div id="game-container">
@@ -1105,6 +1148,7 @@ body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradi
     </div>
     <div id="center">
       <canvas id="world-canvas"></canvas>
+      <div id="coord-hud" aria-live="polite"><span class="coord-label">POS</span> <span class="coord-value" id="coord-value">X:4 Y:4</span></div>
       <div id="flash"></div>
       <div id="npc-dialogue">
         <div class="npc-name" id="npc-name-text">???</div>
@@ -1363,6 +1407,16 @@ function generateMap(){
   for(let x=1;x<w-1;x++){if(m[10][x]===TILE.TREE||m[10][x]===TILE.WATER)m[10][x]=TILE.FLOOR;}
   for(let y=1;y<h-1;y++){if(m[y][20]===TILE.TREE||m[y][20]===TILE.WATER)m[y][20]=TILE.FLOOR;}
   NPC_DEFS.forEach(n=>{m[n.y][n.x]=TILE.NPC;});
+  // ── Stair Down: place at (30,22) — visible south-east, reachable fast ──
+  const SD_X=30, SD_Y=22;
+  // Clear 3x3 around stairs
+  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) m[SD_Y+dy][SD_X+dx]=TILE.FLOOR;
+  m[SD_Y][SD_X]=TILE.STAIR_DOWN;
+  // Carve clear east-west path at row SD_Y from col 1 to SD_X
+  for(let x=1;x<=SD_X;x++) if(m[SD_Y][x]!==TILE.STAIR_DOWN) m[SD_Y][x]=TILE.FLOOR;
+  // Carve clear north-south path at col SD_X from row 1 to SD_Y
+  for(let y=1;y<=SD_Y;y++) if(m[y][SD_X]!==TILE.STAIR_DOWN) m[y][SD_X]=TILE.FLOOR;
+  m._stairDownX=SD_X; m._stairDownY=SD_Y;
   G.map=m;
   G.zones=[
     {name:'Home Base',x:2,y:2,w:8,h:5,heal:true,encounter:false},
@@ -1407,25 +1461,82 @@ function render(){
     else if(tile===TILE.BRIDGE){ctx.fillStyle='#503820';ctx.fillRect(px+3,py,ts-6,ts);}
     else if(tile===TILE.SHOP){ctx.fillStyle='#280c3a';ctx.fillRect(px,py,ts,ts);ctx.font=(ts-4)+'px serif';ctx.textAlign='center';ctx.fillText('\u{1F6D2}',px+ts/2,py+ts-2);}
     else if(tile===TILE.NPC){const npc=NPC_DEFS.find(n=>n.x===x&&n.y===y);ctx.font=(ts-2)+'px serif';ctx.textAlign='center';ctx.fillText(npc?npc.sprite:'?',px+ts/2,py+ts-1);}
+    if(tile===TILE.STAIR_DOWN){
+      ctx.fillStyle='#1a0c2a';ctx.fillRect(px,py,ts,ts);
+      const pulse=0.25+0.15*Math.sin(Date.now()*0.004);
+      ctx.fillStyle='rgba(160,80,255,'+pulse+')';ctx.fillRect(px,py,ts,ts);
+      ctx.font=(ts-2)+'px serif';ctx.textAlign='center';ctx.fillText('\u{2B07}',px+ts/2,py+ts-2);
+      // Label above tile
+      ctx.fillStyle='rgba(200,150,255,0.9)';ctx.font='bold 10px VT323';
+      ctx.fillText('STAIRS',px+ts/2,py-2);
+    }
+    else if(tile===TILE.STAIR_UP){
+      ctx.fillStyle='#0c1a0c';ctx.fillRect(px,py,ts,ts);
+      const pulse=0.25+0.15*Math.sin(Date.now()*0.004);
+      ctx.fillStyle='rgba(80,200,80,'+pulse+')';ctx.fillRect(px,py,ts,ts);
+      ctx.font=(ts-2)+'px serif';ctx.textAlign='center';ctx.fillText('\u{2B06}',px+ts/2,py+ts-2);
+      ctx.fillStyle='rgba(150,230,150,0.9)';ctx.font='bold 10px VT323';
+      ctx.fillText('UP',px+ts/2,py-2);
+    }
     ctx.strokeStyle='rgba(255,255,255,0.02)';ctx.strokeRect(px,py,ts,ts);
   }}
   ctx.font='11px VT323';ctx.textAlign='left';
   for(const z of G.zones){ctx.fillStyle='rgba(255,255,255,0.18)';ctx.fillText(z.name,z.x*ts-G.camera.x+2,z.y*ts-G.camera.y+12);}
+  // Stair label
+  if(G.map._stairDownX){
+    const sx=G.map._stairDownX*ts-G.camera.x, sy=G.map._stairDownY*ts-G.camera.y;
+    if(sx>-60&&sx<W+60&&sy>0&&sy<H){
+      ctx.fillStyle='rgba(180,100,255,0.7)';ctx.textAlign='center';
+      ctx.font='bold 11px VT323';ctx.fillText('⬇ Snow Wastes',sx+ts/2,sy-6);
+    }
+  }
   const px=G.yui.x*ts-G.camera.x,py=G.yui.y*ts-G.camera.y;
   ctx.font=(ts-2)+'px serif';ctx.textAlign='center';ctx.fillText('\u{1F980}',px+ts/2,py+ts-2);
   const hint=getNearbyHint();
   if(hint){ctx.fillStyle='rgba(104,232,184,0.9)';ctx.font='bold 12px VT323';ctx.textAlign='center';ctx.fillText('[Space] '+hint,px+ts/2,py-5);}
+
+  // ── Stair compass: always draw arrow pointing to stair ──
+  if(G.map._stairDownX && G.floor===0){
+    const stairPx=G.map._stairDownX*ts-G.camera.x+ts/2;
+    const stairPy=G.map._stairDownY*ts-G.camera.y+ts/2;
+    const onScreen=stairPx>0&&stairPx<W&&stairPy>0&&stairPy<H;
+    if(!onScreen){
+      // Draw arrow from edge toward stair
+      const dx=stairPx-W/2, dy=stairPy-H/2;
+      const angle=Math.atan2(dy,dx);
+      const edgeX=Math.max(28,Math.min(W-28, W/2+Math.cos(angle)*Math.min(W/2-28,Math.abs(dx))));
+      const edgeY=Math.max(28,Math.min(H-28, H/2+Math.sin(angle)*Math.min(H/2-28,Math.abs(dy))));
+      ctx.save();
+      ctx.translate(edgeX,edgeY);ctx.rotate(angle);
+      ctx.fillStyle='rgba(160,80,255,0.85)';
+      ctx.beginPath();ctx.moveTo(14,0);ctx.lineTo(-8,-7);ctx.lineTo(-8,7);ctx.closePath();ctx.fill();
+      ctx.restore();
+      ctx.fillStyle='rgba(180,120,255,0.9)';ctx.font='bold 11px VT323';ctx.textAlign='center';
+      const dist=Math.round(Math.sqrt(dx*dx+dy*dy)/ts);
+      ctx.fillText('⬇ Stairs ('+dist+'t)',edgeX,edgeY-14);
+    }
+  }
+
   renderMinimap();
 }
 function renderMinimap(){
   const mw=160,mh=120,tw=mw/G.mapW,th=mh/G.mapH;
   mmCtx.fillStyle='#050510';mmCtx.fillRect(0,0,mw,mh);
   for(let y=0;y<G.mapH;y++)for(let x=0;x<G.mapW;x++){
-    const c={0:'#0c0c1a',1:'#203020',2:'#182818',3:'#18243a',4:'#302818',5:'#403018',6:'#280c3a',7:'#183028'}[G.map[y][x]]||'#151525';
+    const t=G.map[y][x];
+    const c={0:'#0c0c1a',1:'#203020',2:'#182818',3:'#18243a',4:'#302818',5:'#403018',6:'#280c3a',7:'#183028',8:'#6020cc',9:'#208820'}[t]||'#151525';
     mmCtx.fillStyle=c;mmCtx.fillRect(x*tw,y*th,tw,th);
   }
   mmCtx.fillStyle='#68e8b8';NPC_DEFS.forEach(n=>mmCtx.fillRect(n.x*tw,n.y*th,tw+1,th+1));
+  // Stair down marker
+  if(G.map._stairDownX){
+    mmCtx.fillStyle='#a050ff';
+    mmCtx.beginPath();mmCtx.arc(G.map._stairDownX*tw+tw/2,G.map._stairDownY*th+th/2,3,0,Math.PI*2);mmCtx.fill();
+  }
   mmCtx.fillStyle='#e8936a';mmCtx.beginPath();mmCtx.arc(G.yui.x*tw+tw/2,G.yui.y*th+th/2,2,0,Math.PI*2);mmCtx.fill();
+  // Legend
+  mmCtx.fillStyle='rgba(160,80,255,0.8)';mmCtx.fillRect(2,mh-14,8,8);
+  mmCtx.fillStyle='rgba(200,180,230,0.7)';mmCtx.font='8px VT323';mmCtx.textAlign='left';mmCtx.fillText('⬇ Stairs',12,mh-7);
 }
 
 // MOVEMENT
@@ -2692,6 +2803,788 @@ function init(){
 }
 window.addEventListener('load',init);
 
+// ============================================================
+//  MULTI-FLOOR SYSTEM — 5 Floors + Infinite generation
+//  Terrain themes: Forest → Snow → Desert → Swamp → Void
+//  Stairs (⬆⬇) to descend / return to surface
+// ============================================================
+
+// ── TILE EXTENSIONS ──
+TILE.STAIR_DOWN = 8;   // descend to next floor
+TILE.STAIR_UP   = 9;   // ascend to previous floor
+TILE.ICE        = 10;  // slippery (Snow biome)
+TILE.SAND       = 11;  // soft sand (Desert)
+TILE.MUD        = 12;  // sticky mud (Swamp)
+TILE.LAVA       = 13;  // impassable lava (Void)
+TILE.BOSS_TILE  = 14;  // boss trigger zone
+
+// ── BIOME DEFINITIONS ──
+const BIOMES = [
+  {
+    id:'forest', name:'Forest', floorLabel:'Surface', icon:'🌲',
+    bgColor:'#050e05',
+    tileColors:{ floor:'#1c2c1c', wall:'#14142a', tree:'#0c1c0c', water:'#0c182c', special:'#203020' },
+    floorColor:'#1c2c1c', wallDecor:'🌲', waterDecor:true,
+    encounterRate:0.09, harderRate:0.13,
+    ambientColor:'rgba(30,80,20,',
+    music:'forest',
+  },
+  {
+    id:'snow', name:'Snow Wastes', floorLabel:'Floor 1', icon:'❄',
+    bgColor:'#08101a',
+    tileColors:{ floor:'#1e2c3a', wall:'#0a1020', tree:'#0e1828', water:'#0c1830', special:'#243040' },
+    floorColor:'#c8dce8', wallDecor:'🌨', waterDecor:false,
+    encounterRate:0.12, harderRate:0.18,
+    ambientColor:'rgba(100,160,220,',
+    music:'snow',
+    groundFill:'rgba(200,220,240,0.15)',
+  },
+  {
+    id:'desert', name:'Desert Ruins', floorLabel:'Floor 2', icon:'🏜',
+    bgColor:'#140e04',
+    tileColors:{ floor:'#2a2010', wall:'#1a1208', tree:'#1c1808', water:'#18240c', special:'#382810' },
+    floorColor:'#c8a050', wallDecor:'🌵', waterDecor:false,
+    encounterRate:0.14, harderRate:0.20,
+    ambientColor:'rgba(220,160,50,',
+    music:'desert',
+    groundFill:'rgba(200,160,60,0.18)',
+  },
+  {
+    id:'swamp', name:'Corrupted Swamp', floorLabel:'Floor 3', icon:'🐸',
+    bgColor:'#060e04',
+    tileColors:{ floor:'#1a2810', wall:'#0c1408', tree:'#121e08', water:'#0e1c08', special:'#1e3010' },
+    floorColor:'#3a4820', wallDecor:'🍄', waterDecor:true,
+    encounterRate:0.16, harderRate:0.22,
+    ambientColor:'rgba(60,160,40,',
+    music:'swamp',
+    groundFill:'rgba(80,120,30,0.2)',
+  },
+  {
+    id:'void', name:'Digital Void', floorLabel:'Floor 4', icon:'🌌',
+    bgColor:'#020208',
+    tileColors:{ floor:'#0e0820', wall:'#04040e', tree:'#080418', water:'#04040c', special:'#140a28' },
+    floorColor:'#1a0840', wallDecor:'💀', waterDecor:false,
+    encounterRate:0.18, harderRate:0.25,
+    ambientColor:'rgba(120,40,200,',
+    music:'void',
+    groundFill:'rgba(100,30,180,0.15)',
+    isBossFloor:true,
+  },
+];
+
+// ── FLOOR-SCALED ENEMY POOLS ──
+const FLOOR_ENEMIES = [
+  // Floor 0 — Forest (surface, already in ENEMY_TYPES)
+  null,
+  // Floor 1 — Snow
+  [
+    {name:'ICE SPIKE',   icon:'🧊', hpMult:1.1, atkMult:1.2, xpMult:1.5, goldMult:2},
+    {name:'FROST BUG',   icon:'❄',  hpMult:0.9, atkMult:1.4, xpMult:1.4, goldMult:1.8},
+    {name:'BLIZZARD.EXE',icon:'🌨', hpMult:1.6, atkMult:1.1, xpMult:1.8, goldMult:2.5},
+    {name:'SNOWLOCK',    icon:'🔮', hpMult:1.3, atkMult:1.3, xpMult:1.7, goldMult:2.2},
+  ],
+  // Floor 2 — Desert
+  [
+    {name:'SANDSTORM',   icon:'🌪', hpMult:1.0, atkMult:1.6, xpMult:1.8, goldMult:2.5},
+    {name:'CACHE VULTR', icon:'🦅', hpMult:1.4, atkMult:1.4, xpMult:2.0, goldMult:3},
+    {name:'SCORPION.SYS',icon:'🦂', hpMult:1.2, atkMult:1.8, xpMult:2.2, goldMult:3},
+    {name:'MUMMY.EXE',   icon:'🪄', hpMult:2.0, atkMult:1.2, xpMult:2.4, goldMult:3.5},
+  ],
+  // Floor 3 — Swamp
+  [
+    {name:'ROOTKIT',     icon:'🐍', hpMult:1.5, atkMult:1.5, xpMult:2.5, goldMult:3.5},
+    {name:'SWAMP.BIN',   icon:'🐊', hpMult:2.2, atkMult:1.3, xpMult:2.8, goldMult:4},
+    {name:'TOXIC LEAK',  icon:'☣',  hpMult:1.3, atkMult:2.0, xpMult:2.6, goldMult:3.5},
+    {name:'PARASITE',    icon:'🦠', hpMult:1.0, atkMult:2.4, xpMult:2.8, goldMult:4},
+  ],
+  // Floor 4 — Void
+  [
+    {name:'VOID ENTITY', icon:'👁', hpMult:2.5, atkMult:2.0, xpMult:3.5, goldMult:5},
+    {name:'CORRUPTION',  icon:'💀', hpMult:3.0, atkMult:1.8, xpMult:4.0, goldMult:6},
+    {name:'NULL GOD',    icon:'🌌', hpMult:2.0, atkMult:2.8, xpMult:4.5, goldMult:7},
+    {name:'DARK CORE',   icon:'⚫', hpMult:4.0, atkMult:2.5, xpMult:5.0, goldMult:8},
+  ],
+];
+
+// ── FLOOR BOSSES ──
+const FLOOR_BOSSES = [
+  null, // surface has no boss
+  {name:'ABSOLUTE ZERO',  icon:'🧊❄🧊', hpMult:8,  atkMult:2.2, xpMult:10, goldMult:20, intro:'The Ice King awakens! Freeze your bugs!'},
+  {name:'DESERT PHARAOH', icon:'🏺🦂🏺', hpMult:10, atkMult:2.5, xpMult:14, goldMult:28, intro:'Ancient code rises from the sands!'},
+  {name:'SWAMP LORD',     icon:'🐊🍄🐊', hpMult:14, atkMult:2.8, xpMult:18, goldMult:40, intro:'The Corrupted Root awakens!'},
+  {name:'THE VOID KING',  icon:'👁🌌👁', hpMult:20, atkMult:3.5, xpMult:30, goldMult:80, intro:'Reality collapses. The Void King emerges!'},
+];
+
+// ── FLOOR STATE ──
+// Store in G so it saves/loads
+G.floor = G.floor || 0;          // current floor index (0=surface)
+G.floorMaps = G.floorMaps || {}; // cached generated floor maps
+G.bossDefeated = G.bossDefeated || {}; // per-floor boss defeated
+
+// Patch saveGame to include floor data
+const _floorSaveGame = saveGame;
+saveGame = function(){
+  // Store floor data in a sidecar key so it doesn't break existing saves
+  try{
+    localStorage.setItem(SAVE_KEY+'_floors', JSON.stringify({
+      floor: G.floor,
+      bossDefeated: G.bossDefeated,
+    }));
+  }catch(e){}
+  _floorSaveGame();
+};
+
+// Patch loadGame to restore floor data
+const _floorLoadGame = loadGame;
+// We hook into init instead (after loadGame runs)
+
+// ── TERRAIN-AWARE TILE COLORS ──
+function getTileColor(tile, biome){
+  const bc = biome.tileColors;
+  switch(tile){
+    case TILE.WALL:       return bc.wall    || '#14142a';
+    case TILE.FLOOR:      return bc.floor   || '#1c2c1c';
+    case TILE.TREE:       return bc.tree    || '#0c1c0c';
+    case TILE.WATER: case TILE.MUD: return bc.water || '#0c182c';
+    case TILE.HOME:       return '#2c2818';
+    case TILE.BRIDGE:     return '#382818';
+    case TILE.SHOP:       return '#200828';
+    case TILE.NPC:        return bc.special || '#182820';
+    case TILE.STAIR_DOWN: return '#1a0c2a';
+    case TILE.STAIR_UP:   return '#0c1a0c';
+    case TILE.ICE:        return '#1e3a50';
+    case TILE.SAND:       return '#3a2c10';
+    case TILE.LAVA:       return '#3a0808';
+    case TILE.BOSS_TILE:  return '#1e0830';
+    default:              return bc.floor || '#1c2c1c';
+  }
+}
+
+// ── PROCEDURAL FLOOR GENERATOR ──
+function generateFloor(floorIdx){
+  if(G.floorMaps[floorIdx]) return G.floorMaps[floorIdx]; // cached
+
+  const biome = BIOMES[Math.min(floorIdx, BIOMES.length-1)];
+  const w = G.mapW, h = G.mapH;
+  const m = [];
+  const seed = floorIdx * 9973 + 12345;
+  let rngState = seed;
+  function rng(){ rngState = (rngState * 1664525 + 1013904223) & 0xffffffff; return (rngState >>> 0) / 0xffffffff; }
+
+  // Fill with biome-appropriate tiles
+  for(let y=0;y<h;y++){
+    m.push([]);
+    for(let x=0;x<w;x++){
+      if(x===0||y===0||x===w-1||y===h-1){ m[y].push(TILE.WALL); continue; }
+      const r = rng();
+      let tile = TILE.FLOOR;
+      if(biome.id==='snow'){
+        if(r<0.08) tile=TILE.WALL;
+        else if(r<0.18) tile=TILE.ICE;
+        else if(r<0.22) tile=TILE.WATER;
+      } else if(biome.id==='desert'){
+        if(r<0.10) tile=TILE.WALL;
+        else if(r<0.24) tile=TILE.SAND;
+        else if(r<0.26) tile=TILE.WATER; // oasis
+        if(rng()<0.04) tile=TILE.TREE; // cactus
+      } else if(biome.id==='swamp'){
+        if(r<0.06) tile=TILE.WALL;
+        else if(r<0.16) tile=TILE.MUD;
+        else if(r<0.28) tile=TILE.WATER;
+        else if(r<0.32) tile=TILE.TREE;
+      } else if(biome.id==='void'){
+        if(r<0.12) tile=TILE.WALL;
+        else if(r<0.20) tile=TILE.LAVA;
+      } else { // forest
+        if(r<0.12) tile=TILE.TREE;
+        else if(r<0.18) tile=TILE.WATER;
+      }
+      m[y].push(tile);
+    }
+  }
+
+  // Carve guaranteed corridors so map is navigable
+  const corridorY = Math.floor(h*0.4);
+  const corridorX = Math.floor(w*0.5);
+  for(let x=1;x<w-1;x++) if(m[corridorY][x]!==TILE.LAVA) m[corridorY][x]=TILE.FLOOR;
+  for(let y=1;y<h-1;y++) if(m[y][corridorX]!==TILE.LAVA) m[y][corridorX]=TILE.FLOOR;
+
+  // ── Stair Down (descend to next floor) — south-east quadrant ──
+  const sdx=Math.floor(w*0.75+rng()*5), sdy=Math.floor(h*0.7+rng()*5);
+  m[Math.min(sdy,h-2)][Math.min(sdx,w-2)] = TILE.STAIR_DOWN;
+  // Clear a small area around it
+  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+    const ty=sdy+dy, tx=sdx+dx;
+    if(ty>0&&ty<h-1&&tx>0&&tx<w-1&&m[ty][tx]!==TILE.STAIR_DOWN) m[ty][tx]=TILE.FLOOR;
+  }
+
+  // ── Stair Up (return to previous floor) — only on floors > 0 ──
+  let sux=3, suy=3;
+  if(floorIdx>0){
+    sux=Math.floor(w*0.15+rng()*4); suy=Math.floor(h*0.15+rng()*4);
+    m[Math.min(suy,h-2)][Math.min(sux,w-2)] = TILE.STAIR_UP;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+      const ty=suy+dy, tx=sux+dx;
+      if(ty>0&&ty<h-1&&tx>0&&tx<w-1&&m[ty][tx]!==TILE.STAIR_UP) m[ty][tx]=TILE.FLOOR;
+    }
+  }
+
+  // ── Boss Tile (only if boss not yet defeated, floors 1-4) ──
+  if(floorIdx>0 && !G.bossDefeated[floorIdx]){
+    const bx=Math.floor(w*0.8), by=Math.floor(h*0.8);
+    for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++){
+      const ty=by+dy, tx=bx+dx;
+      if(ty>0&&ty<h-1&&tx>0&&tx<w-1) m[ty][tx]=TILE.BOSS_TILE;
+    }
+    m._bossX=bx; m._bossY=by;
+  }
+
+  // ── Bridge water gaps ──
+  for(let y=1;y<h-1;y++) for(let x=1;x<w-1;x++){
+    if((m[y][x]===TILE.WATER||m[y][x]===TILE.MUD)&&m[y][x-1]===TILE.FLOOR&&m[y][x+1]===TILE.FLOOR) m[y][x]=TILE.BRIDGE;
+  }
+
+  // Record stair positions for the renderer
+  m._stairDownX=sdx; m._stairDownY=sdy;
+  m._stairUpX=sux; m._stairUpY=suy;
+
+  G.floorMaps[floorIdx] = m;
+  return m;
+}
+
+// ── FLOOR ZONES ──
+function getFloorZones(floorIdx){
+  const w=G.mapW, h=G.mapH;
+  const biome=BIOMES[Math.min(floorIdx,BIOMES.length-1)];
+  return [
+    {name:biome.name+' — North',x:1,y:1,w:w-2,h:Math.floor(h*0.45),encounter:true,floorIdx},
+    {name:biome.name+' — South',x:1,y:Math.floor(h*0.45),w:w-2,h:Math.floor(h*0.55)-1,encounter:true,harder:floorIdx>0,floorIdx},
+  ];
+}
+
+// ── TRANSITION TO FLOOR ──
+function goToFloor(targetFloor, spawnNearStairUp=false){
+  if(targetFloor<0) return; // can't go above surface
+
+  G.floor = targetFloor;
+  G.map = generateFloor(targetFloor);
+  G.zones = getFloorZones(targetFloor);
+  G.currentZone = BIOMES[Math.min(targetFloor,BIOMES.length-1)].name;
+
+  // Spawn position
+  if(spawnNearStairUp){
+    // When ascending, spawn near the STAIR_DOWN on the target floor (where we came from)
+    G.yui.x = (G.map._stairDownX || 4) + 1;
+    G.yui.y = (G.map._stairDownY || 4);
+  } else {
+    // When descending, spawn near the STAIR_UP on the target floor
+    G.yui.x = (G.map._stairUpX || 3) + 1;
+    G.yui.y = (G.map._stairUpY || 3);
+  }
+
+  // Safety: ensure spawn tile is walkable
+  const safe=[[0,0],[1,0],[-1,0],[0,1],[0,-1],[2,0],[0,2]];
+  for(const [dx,dy] of safe){
+    const nx=G.yui.x+dx, ny=G.yui.y+dy;
+    if(nx>0&&ny>0&&nx<G.mapW&&ny<G.mapH){
+      const t=G.map[ny][nx];
+      if(t===TILE.FLOOR||t===TILE.BRIDGE){G.yui.x=nx;G.yui.y=ny;break;}
+    }
+  }
+
+  // Update minimap NPC list for surface (NPCs only exist on floor 0)
+  G.safeSteps=10; pauseEncounters(2000);
+  closeNPCDialogue();
+
+  const biome=BIOMES[Math.min(targetFloor,BIOMES.length-1)];
+  const dir=spawnNearStairUp?'ascended':'descended';
+  addLog((dir==='descended'?'⬇ Descended':'⬆ Ascended')+' to '+biome.name+' ('+biome.floorLabel+')','system');
+
+  // Show floor title card
+  showFloorCard(targetFloor);
+  updateUI();
+
+  // Save floor to localstorage
+  try{localStorage.setItem(SAVE_KEY+'_floors',JSON.stringify({floor:G.floor,bossDefeated:G.bossDefeated}));}catch(e){}
+}
+
+// ── FLOOR TITLE CARD ──
+function showFloorCard(floorIdx){
+  const biome=BIOMES[Math.min(floorIdx,BIOMES.length-1)];
+  const isBossFloor=floorIdx>0&&FLOOR_BOSSES[floorIdx];
+  const bossDefeated=G.bossDefeated[floorIdx];
+  const extra=isBossFloor&&!bossDefeated
+    ? '<br><span style="color:var(--hp);font-size:13px;">⚠ Boss lurks in the depths!</span>'
+    : isBossFloor&&bossDefeated
+    ? '<br><span style="color:var(--accent3);font-size:13px;">✓ Boss defeated</span>'
+    : '';
+  const minLv=[0,3,8,14,20][floorIdx]||0;
+  const rec=minLv>0?'<br><span style="color:var(--muted);font-size:13px;">Recommended Lv '+minLv+'+</span>':'';
+  showPopup(
+    biome.floorLabel.toUpperCase()+': '+biome.name,
+    biome.icon+' <b>'+biome.name+'</b>'+extra+rec+
+    '<br><span style="color:var(--muted);font-size:13px;">Find '+
+    (floorIdx<BIOMES.length-1?'⬇ stairs to go deeper':'the VOID KING to win!')+
+    (floorIdx>0?' or ⬆ stairs to ascend':'')+'</span>',
+    [{label:'Explore!', fn:closePopup, confirm:true}]
+  );
+}
+
+// ── BOSS BATTLE ──
+function startBossBattle(floorIdx){
+  if(G.bossDefeated[floorIdx]) return;
+  const boss=FLOOR_BOSSES[floorIdx];
+  if(!boss) return;
+  resetMovement();closeNPCDialogue();
+  const lv=G.yui.level;
+  const enemy={
+    name:boss.name,icon:boss.icon,
+    level:lv+floorIdx*3,isBoss:true,floorIdx,
+    maxHp:Math.round(20*lv*boss.hpMult),
+    atk:Math.round((4+lv*1.5)*boss.atkMult),
+    xpReward:Math.round(20*lv*boss.xpMult),
+    goldReward:Math.round(5*lv*boss.goldMult),
+  };
+  enemy.hp=enemy.maxHp;
+  G.currentEnemy=enemy;G.mode='battle';G.battleLocked=false;G.battleTurn='player';
+  document.getElementById('battle-screen').classList.add('active');
+  document.getElementById('shop-screen').classList.remove('active');
+  document.body.classList.add('in-battle');document.body.classList.remove('in-world','in-shop','shop-is-open');
+  document.getElementById('enemy-sprite').textContent=boss.icon;
+  document.getElementById('enemy-name').textContent=boss.name;
+  document.getElementById('b-elvl').textContent=' BOSS';
+  updateBattleUI();
+  setBattleLog('🔥 <b style="color:var(--hp)">BOSS BATTLE!</b><br>'+boss.intro);
+  addLog('BOSS: '+boss.name,'combat');
+  setActionButtons(true);
+  // Boss cannot be run from
+  document.getElementById('btn-run').disabled=true;
+  document.getElementById('btn-run').style.opacity='0.25';
+}
+
+// ── HOOK victorySeq TO DETECT BOSS WIN ──
+const _origVictoryForFloor=victorySeq;
+victorySeq=function(){
+  const e=G.currentEnemy;
+  if(e&&e.isBoss){
+    G.bossDefeated[e.floorIdx]=true;
+    try{localStorage.setItem(SAVE_KEY+'_floors',JSON.stringify({floor:G.floor,bossDefeated:G.bossDefeated}));}catch(err){}
+    // Re-enable run button
+    const runBtn=document.getElementById('btn-run');
+    if(runBtn){runBtn.disabled=false;runBtn.style.opacity='';}
+    // Regenerate the floor map to remove boss tiles
+    delete G.floorMaps[e.floorIdx];
+    addLog('🏆 BOSS DEFEATED! '+e.name+' is gone!','level');
+    showAchievement('Boss Slayer','Defeated '+e.name+'!');
+    // Give bonus loot
+    G.yui.gold+=e.goldReward*2;
+    addLog('Bonus loot: +'+(e.goldReward*2)+'G','loot');
+  }
+  _origVictoryForFloor();
+};
+
+// ── HOOK endBattle TO RESTORE RUN BUTTON ──
+const _origEndBattleForFloor=endBattle;
+endBattle=function(){
+  const runBtn=document.getElementById('btn-run');
+  if(runBtn){runBtn.disabled=false;runBtn.style.opacity='';}
+  _origEndBattleForFloor();
+  // If on a floor that now has boss defeated, regenerate map
+  if(G.bossDefeated[G.floor]&&G.floorMaps[G.floor]){
+    // Remove boss tiles from cached map
+    const m=G.floorMaps[G.floor];
+    if(m._bossX&&m._bossY){
+      const bx=m._bossX,by=m._bossY;
+      for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++){
+        const ty=by+dy,tx=bx+dx;
+        if(ty>0&&ty<G.mapH&&tx>0&&tx<G.mapW&&m[ty][tx]===TILE.BOSS_TILE) m[ty][tx]=TILE.FLOOR;
+      }
+      delete m._bossX; delete m._bossY;
+    }
+  }
+};
+
+// ── HOOK checkEncounter TO USE FLOOR ENEMIES ──
+const _origCheckEncounterForFloor=checkEncounter;
+checkEncounter=function(){
+  if(G.floor===0){_origCheckEncounterForFloor();return;}
+  const z=G.zones.find(z=>z.encounter&&G.yui.x>=z.x&&G.yui.x<z.x+z.w&&G.yui.y>=z.y&&G.yui.y<z.y+z.h);
+  if(!z)return;
+  if(performance.now()<(G.encounterCooldownUntil||0))return;
+  if((G.safeSteps||0)>0){G.safeSteps--;return;}
+  const biome=BIOMES[Math.min(G.floor,BIOMES.length-1)];
+  const rate=(z.harder?biome.harderRate:biome.encounterRate);
+  if(Math.random()<rate){
+    G.safeSteps=4;
+    startFloorBattle(G.floor,z.harder||false);
+  }
+};
+
+function startFloorBattle(floorIdx,harder=false){
+  if(G.mode!=='world')return;
+  resetMovement();closeNPCDialogue();
+  const pool=FLOOR_ENEMIES[Math.min(floorIdx,FLOOR_ENEMIES.length-1)]||ENEMY_TYPES;
+  const tmpl=pool[Math.floor(Math.random()*pool.length)];
+  const lv=G.yui.level;
+  const sl=harder?Math.max(1,lv+Math.floor(Math.random()*3)+1):Math.max(1,lv+Math.floor(Math.random()*2));
+  const enemy={
+    name:tmpl.name,icon:tmpl.icon,level:sl,
+    maxHp:Math.round(20*sl*tmpl.hpMult),
+    atk:Math.round((4+sl*1.5)*tmpl.atkMult),
+    xpReward:Math.round(20*sl*tmpl.xpMult),
+    goldReward:Math.round(5*sl*tmpl.goldMult),
+  };
+  enemy.hp=enemy.maxHp;
+  G.currentEnemy=enemy;G.mode='battle';G.battleLocked=false;G.battleTurn='player';
+  document.getElementById('battle-screen').classList.add('active');
+  document.getElementById('shop-screen').classList.remove('active');
+  document.body.classList.add('in-battle');document.body.classList.remove('in-world','in-shop','shop-is-open');
+  document.getElementById('enemy-sprite').textContent=enemy.icon;
+  document.getElementById('enemy-name').textContent=enemy.name;
+  document.getElementById('b-elvl').textContent=' LV'+enemy.level;
+  updateBattleUI();
+  setBattleLog('⚡ A wild <b>'+enemy.name+'</b> (Lv'+enemy.level+') appeared!');
+  addLog('Encounter: '+enemy.name+' Lv'+enemy.level,'combat');setActionButtons(true);
+}
+
+// ── HOOK movePlayer TO CHECK STAIR / BOSS TILES ──
+const _origMovePlayerForFloor=movePlayer;
+movePlayer=function(dx,dy){
+  // Check destination tile before moving
+  const nx=G.yui.x+dx, ny=G.yui.y+dy;
+  if(nx<0||ny<0||nx>=G.mapW||ny>=G.mapH) return;
+  const tile=G.map[ny][nx];
+
+  // ICE: allow movement (slippery, no extra cost)
+  // SAND/MUD: slow (skip every 2nd step handled by encounter rate)
+  // LAVA: block
+  if(tile===TILE.LAVA) return;
+
+  // STAIR_DOWN — step on it triggers descent
+  if(tile===TILE.STAIR_DOWN){
+    _origMovePlayerForFloor(dx,dy); // move onto tile
+    setTimeout(()=>handleStairDown(),200);
+    return;
+  }
+  // STAIR_UP — step on it triggers ascent
+  if(tile===TILE.STAIR_UP){
+    _origMovePlayerForFloor(dx,dy);
+    setTimeout(()=>handleStairUp(),200);
+    return;
+  }
+  // BOSS_TILE — triggers boss
+  if(tile===TILE.BOSS_TILE&&!G.bossDefeated[G.floor]){
+    _origMovePlayerForFloor(dx,dy);
+    setTimeout(()=>startBossBattle(G.floor),200);
+    return;
+  }
+
+  _origMovePlayerForFloor(dx,dy);
+};
+
+function handleStairDown(){
+  if(G.mode!=='world') return;
+  const nextFloor=G.floor+1;
+  const maxFloor=BIOMES.length-1;
+  if(nextFloor>maxFloor){
+    addLog('⚠ This is the deepest floor. Defeat the VOID KING to win!','system');
+    return;
+  }
+  const minLv=[0,3,8,14,20][nextFloor]||0;
+  const biome=BIOMES[Math.min(nextFloor,BIOMES.length-1)];
+  showPopup('DESCEND?',
+    '⬇ Descend to <b style="color:var(--accent)">'+biome.name+'</b>?'+
+    (minLv>G.yui.level?'<br><span style="color:var(--hp)">⚠ Recommended Lv '+minLv+'+ (you are Lv'+G.yui.level+')</span>':'<br>'+biome.icon+' The '+biome.name+' awaits...'),
+    [
+      {label:'Descend ⬇', fn:()=>{closePopup();goToFloor(nextFloor,false);}, confirm:true},
+      {label:'Stay', fn:closePopup},
+    ]
+  );
+}
+
+function handleStairUp(){
+  if(G.mode!=='world') return;
+  if(G.floor===0){addLog('Already on the surface!','system');return;}
+  const prevFloor=G.floor-1;
+  const biome=BIOMES[Math.min(prevFloor,BIOMES.length-1)];
+  showPopup('ASCEND?',
+    '⬆ Ascend to <b style="color:var(--accent)">'+biome.name+'</b> ('+biome.floorLabel+')?',
+    [
+      {label:'Ascend ⬆', fn:()=>{closePopup();goToFloor(prevFloor,true);}, confirm:true},
+      {label:'Stay', fn:closePopup},
+    ]
+  );
+}
+
+// ── HOOK getNearbyHint ──
+const _origGetNearbyHintForFloor=getNearbyHint;
+getNearbyHint=function(){
+  const base=_origGetNearbyHintForFloor();
+  if(base) return base;
+  const {x,y}=G.yui;
+  if(!G.map||!G.map[y]) return null;
+  const tile=G.map[y][x];
+  if(tile===TILE.STAIR_DOWN) return 'Descend ⬇';
+  if(tile===TILE.STAIR_UP)   return 'Ascend ⬆';
+  if(tile===TILE.BOSS_TILE&&!G.bossDefeated[G.floor]) return 'BOSS ARENA ⚠';
+  return null;
+};
+
+// ── HOOK interact FOR STAIR INTERACTION ──
+const _origInteractForFloor=interact;
+interact=function(){
+  if(G.mode!=='world') return;
+  const {x,y}=G.yui;
+  if(G.map&&G.map[y]){
+    const tile=G.map[y][x];
+    if(tile===TILE.STAIR_DOWN){handleStairDown();return;}
+    if(tile===TILE.STAIR_UP){handleStairUp();return;}
+    if(tile===TILE.BOSS_TILE&&!G.bossDefeated[G.floor]){startBossBattle(G.floor);return;}
+  }
+  _origInteractForFloor();
+};
+
+// ── HOOK render TO DRAW FLOOR-AWARE TILES ──
+const _origRenderForFloor=render;
+render=function(){
+  if(G.floor===0){_origRenderForFloor();return;}
+  // Floor 1+ custom renderer
+  if(G.mode==='battle'||G.mode==='shop'){if(mmCtx&&G.map)renderFloorMinimap();return;}
+  if(!ctx||!G.map) return;
+  const biome=BIOMES[Math.min(G.floor,BIOMES.length-1)];
+  const W=worldCanvas.width,H=worldCanvas.height,ts=G.tileSize;
+  G.camera.x=Math.round(G.yui.x*ts-W/2);
+  G.camera.y=Math.round(G.yui.y*ts-H/2);
+  ctx.fillStyle=biome.bgColor;ctx.fillRect(0,0,W,H);
+
+  // Restore world ambience for non-surface floors
+  if(typeof renderWorldAmbience === 'function') renderWorldAmbience(W,H);
+
+  // Restore weather for non-surface floors
+  if(G.mode==='world' && (typeof currentWeather !== 'undefined') && (currentWeather==='rain'||currentWeather==='fog')){
+    if(typeof renderWeather === 'function') renderWeather(W,H);
+  }
+
+  const sX=Math.max(0,Math.floor(G.camera.x/ts));
+  const sY=Math.max(0,Math.floor(G.camera.y/ts));
+  const eX=Math.min(G.mapW,Math.ceil((G.camera.x+W)/ts));
+  const eY=Math.min(G.mapH,Math.ceil((G.camera.y+H)/ts));
+
+  for(let y=sY;y<eY;y++) for(let x=sX;x<eX;x++){
+    const tile=G.map[y][x];
+    const px=x*ts-G.camera.x, py=y*ts-G.camera.y;
+    ctx.fillStyle=getTileColor(tile,biome);ctx.fillRect(px,py,ts,ts);
+
+    if(tile===TILE.STAIR_DOWN){
+      ctx.fillStyle='rgba(180,100,255,0.3)';ctx.fillRect(px,py,ts,ts);
+      ctx.font=(ts-2)+'px serif';ctx.textAlign='center';ctx.fillText('⬇',px+ts/2,py+ts-2);
+    } else if(tile===TILE.STAIR_UP){
+      ctx.fillStyle='rgba(100,200,100,0.3)';ctx.fillRect(px,py,ts,ts);
+      ctx.font=(ts-2)+'px serif';ctx.textAlign='center';ctx.fillText('⬆',px+ts/2,py+ts-2);
+    } else if(tile===TILE.BOSS_TILE&&!G.bossDefeated[G.floor]){
+      const pulse=0.15+0.1*Math.sin(Date.now()*0.004);
+      ctx.fillStyle='rgba(255,30,30,'+pulse+')';ctx.fillRect(px,py,ts,ts);
+      ctx.font=(ts-4)+'px serif';ctx.textAlign='center';ctx.fillText('💀',px+ts/2,py+ts-2);
+    } else if(tile===TILE.TREE){
+      ctx.font=(ts-2)+'px serif';ctx.textAlign='center';
+      ctx.fillText(biome.wallDecor||'🌲',px+ts/2,py+ts-1);
+    } else if(tile===TILE.WATER||tile===TILE.MUD){
+      const col=tile===TILE.MUD?'rgba(80,120,30,0.4)':'rgba(126,200,227,0.15)';
+      ctx.fillStyle=col;ctx.fillRect(px+1,py+ts/2,ts-2,ts/2-1);
+    } else if(tile===TILE.ICE){
+      ctx.fillStyle='rgba(160,210,240,0.25)';ctx.fillRect(px,py,ts,ts);
+    } else if(tile===TILE.SAND){
+      ctx.fillStyle='rgba(200,160,60,0.2)';ctx.fillRect(px,py,ts,ts);
+    } else if(tile===TILE.LAVA){
+      const glow=0.4+0.2*Math.sin(Date.now()*0.006+x+y);
+      ctx.fillStyle='rgba(255,80,0,'+glow+')';ctx.fillRect(px,py,ts,ts);
+      ctx.fillStyle='rgba(255,200,0,0.3)';ctx.fillRect(px+2,py+ts/2,ts-4,ts/2-2);
+    } else if(tile===TILE.BRIDGE){
+      ctx.fillStyle='#503820';ctx.fillRect(px+3,py,ts-6,ts);
+    }
+    ctx.strokeStyle='rgba(255,255,255,0.015)';ctx.strokeRect(px,py,ts,ts);
+  }
+
+  // Zone labels
+  ctx.font='11px VT323';ctx.textAlign='left';
+  for(const z of G.zones){
+    const zx=z.x*ts-G.camera.x+2,zy=z.y*ts-G.camera.y+12;
+    if(zx>-50&&zy>0&&zx<W+50&&zy<H)ctx.fillStyle='rgba(255,255,255,0.15)',ctx.fillText(z.name,zx,zy);
+  }
+
+  // Player
+  const px=G.yui.x*ts-G.camera.x,py=G.yui.y*ts-G.camera.y;
+  ctx.fillStyle='rgba(0,0,0,0.25)';ctx.beginPath();ctx.ellipse(px+ts/2,py+ts-3,ts*0.3,ts*0.1,0,0,Math.PI*2);ctx.fill();
+  ctx.font=(ts-2)+'px serif';ctx.textAlign='center';ctx.fillText('🦀',px+ts/2,py+ts-2);
+
+  // Hint
+  const hint=getNearbyHint();
+  if(hint){
+    ctx.fillStyle='rgba(104,232,184,0.9)';ctx.font='bold 12px VT323';ctx.textAlign='center';
+    ctx.fillText('[Space] '+hint,px+ts/2,py-5);
+  }
+
+  // Stair compass arrows — point to stairs when off-screen
+  function drawStairCompass(tileX,tileY,color,label){
+    if(!tileX) return;
+    const spx=tileX*ts-G.camera.x+ts/2, spy=tileY*ts-G.camera.y+ts/2;
+    if(spx>0&&spx<W&&spy>0&&spy<H) return; // on screen, no arrow needed
+    const dx=spx-W/2, dy=spy-H/2;
+    const angle=Math.atan2(dy,dx);
+    const ex=Math.max(30,Math.min(W-30, W/2+Math.cos(angle)*(Math.min(W/2,Math.abs(dx))-30)));
+    const ey=Math.max(30,Math.min(H-30, H/2+Math.sin(angle)*(Math.min(H/2,Math.abs(dy))-30)));
+    ctx.save();ctx.translate(ex,ey);ctx.rotate(angle);
+    ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(14,0);ctx.lineTo(-8,-7);ctx.lineTo(-8,7);ctx.closePath();ctx.fill();
+    ctx.restore();
+    ctx.fillStyle=color;ctx.font='bold 11px VT323';ctx.textAlign='center';
+    const dist=Math.round(Math.sqrt(dx*dx+dy*dy)/ts);
+    ctx.fillText(label+' ('+dist+'t)',ex,ey-14);
+  }
+  drawStairCompass(G.map._stairDownX,G.map._stairDownY,'rgba(160,80,255,0.9)','⬇ Next Floor');
+  drawStairCompass(G.map._stairUpX,G.map._stairUpY,'rgba(80,200,80,0.9)','⬆ Surface');
+
+  // Restore animations/particles for non-surface floors
+  if(typeof updateParticles === 'function') updateParticles(ctx,W,H,true);
+
+  renderFloorMinimap();
+};
+
+function renderFloorMinimap(){
+  if(!mmCtx||!G.map) return;
+  const mw=160,mh=120,tw=mw/G.mapW,th=mh/G.mapH;
+  const biome=BIOMES[Math.min(G.floor,BIOMES.length-1)];
+  mmCtx.fillStyle=biome.bgColor;mmCtx.fillRect(0,0,mw,mh);
+  for(let y=0;y<G.mapH;y++) for(let x=0;x<G.mapW;x++){
+    const tile=G.map[y][x];
+    let c='#151525';
+    if(tile===TILE.FLOOR)c=biome.tileColors.floor;
+    else if(tile===TILE.WALL)c=biome.tileColors.wall;
+    else if(tile===TILE.WATER||tile===TILE.MUD)c='#18303a';
+    else if(tile===TILE.STAIR_DOWN)c='#8040ff';
+    else if(tile===TILE.STAIR_UP)c='#40c040';
+    else if(tile===TILE.BOSS_TILE)c='#cc2020';
+    else if(tile===TILE.LAVA)c='#cc4400';
+    mmCtx.fillStyle=c;mmCtx.fillRect(x*tw,y*th,tw,th);
+  }
+  // Player dot
+  mmCtx.fillStyle='#e8936a';mmCtx.beginPath();mmCtx.arc(G.yui.x*tw+tw/2,G.yui.y*th+th/2,2.5,0,Math.PI*2);mmCtx.fill();
+}
+
+// ── HUD: FLOOR INDICATOR ──
+(function(){
+  // Add floor badge to topbar logo
+  const logo=document.querySelector('#topbar .logo');
+  if(logo){
+    const badge=document.createElement('span');
+    badge.id='floor-badge';
+    badge.style.cssText='margin-left:8px;font-size:7px;background:rgba(200,106,232,0.2);border:1px solid var(--shop);color:var(--shop);padding:1px 6px;border-radius:3px;vertical-align:middle;';
+    badge.textContent='LV0';
+    logo.appendChild(badge);
+  }
+  // Add to mobile HUD
+  const mLoc=document.getElementById('m-loc-name');
+  if(mLoc&&mLoc.parentElement){
+    const fb=document.createElement('b');
+    fb.id='m-floor-badge';fb.style.color='var(--shop)';fb.textContent='';
+    mLoc.parentElement.appendChild(document.createTextNode(' '));
+    mLoc.parentElement.appendChild(fb);
+  }
+})();
+
+function updateFloorHUD(){
+  const biome=BIOMES[Math.min(G.floor,BIOMES.length-1)];
+  const badge=document.getElementById('floor-badge');
+  if(badge) badge.textContent=biome.icon+' '+biome.floorLabel;
+  const mb=document.getElementById('m-floor-badge');
+  if(mb) mb.textContent=' '+biome.icon;
+  // Update loc-label in left panel
+  const ll=document.getElementById('loc-label');
+  if(ll) ll.textContent=biome.floorLabel+': '+G.currentZone;
+}
+
+// Patch updateUI to also update floor HUD
+const _origUpdateUIForFloor=updateUI;
+updateUI=function(){
+  _origUpdateUIForFloor();
+  updateFloorHUD();
+};
+
+// ── LOAD FLOOR SAVE DATA ──
+(function(){
+  try{
+    const raw=localStorage.getItem(SAVE_KEY+'_floors');
+    if(raw){
+      const d=JSON.parse(raw);
+      if(typeof d.floor==='number') G.floor=d.floor;
+      if(d.bossDefeated) G.bossDefeated=d.bossDefeated;
+    }
+  }catch(e){}
+})();
+
+// ── INIT FLOOR: if not on surface, regenerate the saved floor ──
+// We hook into the load-complete path by wrapping init
+const _origInitForFloor=init;
+init=function(){
+  _origInitForFloor();
+  // After init runs, if we loaded a save on a non-zero floor, switch there
+  const savedFloor=G.floor||0;
+  if(savedFloor>0){
+    G.floor=0; // reset so goToFloor runs properly
+    // Silently go to saved floor without popup
+    G.floor=savedFloor;
+    G.map=generateFloor(savedFloor);
+    G.zones=getFloorZones(savedFloor);
+    G.currentZone=BIOMES[Math.min(savedFloor,BIOMES.length-1)].name;
+  }
+  // If surface, make sure we use the normal surface map
+  if(G.floor===0){
+    // generateMap was already called in init, nothing to do
+  }
+  updateFloorHUD();
+};
+
+// ── ADD FLOOR ACHIEVEMENTS ──
+const FLOOR_ACHS=[
+  {key:'floor_1_visited',title:'Into the Snow','desc':'Descended to Floor 1'},
+  {key:'floor_2_visited',title:'Desert Wanderer','desc':'Descended to Floor 2'},
+  {key:'floor_3_visited',title:'Swamp Thing','desc':'Descended to Floor 3'},
+  {key:'floor_4_visited',title:'Void Walker','desc':'Descended to Floor 4'},
+  {key:'boss_1_defeated',title:'Ice Breaker','desc':'Defeated the Snow Boss'},
+  {key:'boss_2_defeated',title:'Pharaoh Slayer','desc':'Defeated the Desert Boss'},
+  {key:'boss_3_defeated',title:'Swamp Lord','desc':'Defeated the Swamp Boss'},
+  {key:'boss_4_defeated',title:'Void Conqueror','desc':'Defeated the VOID KING!'},
+];
+
+// Hook goToFloor to grant floor visit achievements
+const _origGoToFloor=goToFloor;
+goToFloor=function(targetFloor,spawnNearStairUp){
+  _origGoToFloor(targetFloor,spawnNearStairUp);
+  if(targetFloor>0){
+    const k='floor_'+targetFloor+'_visited';
+    if(!G.achievements.includes(k)){
+      G.achievements.push(k);
+      const a=FLOOR_ACHS.find(a=>a.key===k);
+      if(a)showAchievement(a.title,a.desc);
+    }
+  }
+};
+
+// Hook victorySeq (via boss override above) to grant boss achievements
+const _origBossVictoryForAch=victorySeq;
+victorySeq=function(){
+  const e=G.currentEnemy;
+  if(e&&e.isBoss){
+    const k='boss_'+e.floorIdx+'_defeated';
+    if(!G.achievements.includes(k)){
+      G.achievements.push(k);
+      const a=FLOOR_ACHS.find(a=>a.key===k);
+      if(a)showAchievement(a.title,a.desc);
+    }
+  }
+  _origBossVictoryForAch();
+};
+
+
 
 // === Mobile overlay escape / stuck-screen fixes ===
 (function(){
@@ -3772,6 +4665,216 @@ window.addEventListener('load',init);
     document.addEventListener('DOMContentLoaded', boot);
   } else {
     boot();
+  }
+})();
+
+
+
+// ============================================================
+// COORDINATE HUD + VIBRANT STAIRS PATCH
+// - Shows crab position as X/Y and updates after every movement.
+// - Draws bright stair markers on top of all existing renderers.
+// ============================================================
+(function(){
+  function ensureCoordHud(){
+    if(document.getElementById('coord-value')) return;
+    const center=document.getElementById('center')||document.body;
+    const hud=document.createElement('div');
+    hud.id='coord-hud';
+    hud.setAttribute('aria-live','polite');
+    hud.innerHTML='<span class="coord-label">POS</span> <span class="coord-value" id="coord-value">X:0 Y:0</span>';
+    center.appendChild(hud);
+  }
+
+  window.updateCoordHUD=function(){
+    ensureCoordHud();
+    const el=document.getElementById('coord-value');
+    if(!el||typeof G==='undefined'||!G.yui) return;
+    el.textContent='X:'+G.yui.x+' Y:'+G.yui.y;
+  };
+
+  function stairColor(tile){
+    if(tile===TILE.STAIR_DOWN) return {main:'#ff38ff', glow:'rgba(255,56,255,0.36)', rim:'#ffd6ff', arrow:'⬇'};
+    if(tile===TILE.STAIR_UP) return {main:'#39ff88', glow:'rgba(57,255,136,0.34)', rim:'#d8ffe8', arrow:'⬆'};
+    return null;
+  }
+
+  window.drawVibrantStairMarkers=function(){
+    if(!ctx||!worldCanvas||!G||!G.map||G.mode!=='world') return;
+    const ts=G.tileSize||20;
+    const W=worldCanvas.width,H=worldCanvas.height;
+    const t=Date.now()*0.006;
+    const stairTiles=[];
+    for(let y=0;y<G.mapH;y++){
+      for(let x=0;x<G.mapW;x++){
+        const tile=G.map[y]&&G.map[y][x];
+        if(tile===TILE.STAIR_DOWN||tile===TILE.STAIR_UP) stairTiles.push({x,y,tile});
+      }
+    }
+    for(const s of stairTiles){
+      const c=stairColor(s.tile);
+      if(!c) continue;
+      const px=s.x*ts-G.camera.x, py=s.y*ts-G.camera.y;
+      if(px<-ts||py<-ts||px>W+ts||py>H+ts) continue;
+      const pulse=0.5+0.5*Math.sin(t+s.x*0.7+s.y*0.3);
+      ctx.save();
+      ctx.fillStyle='rgba(8,2,22,0.94)';
+      ctx.fillRect(px,py,ts,ts);
+      ctx.fillStyle=c.glow;
+      ctx.fillRect(px-2,py-2,ts+4,ts+4);
+      ctx.strokeStyle=c.main;
+      ctx.lineWidth=2;
+      ctx.strokeRect(px+2,py+2,ts-4,ts-4);
+      ctx.strokeStyle=c.rim;
+      ctx.globalAlpha=0.58+pulse*0.38;
+      ctx.strokeRect(px-1,py-1,ts+2,ts+2);
+      ctx.globalAlpha=1;
+      ctx.fillStyle=c.main;
+      ctx.font='bold '+Math.max(18,ts)+'px serif';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.shadowColor=c.main;
+      ctx.shadowBlur=14;
+      ctx.fillText(c.arrow,px+ts/2,py+ts/2+1);
+      ctx.shadowBlur=0;
+      ctx.font='bold 11px VT323';
+      ctx.fillStyle=c.rim;
+      ctx.fillText(s.tile===TILE.STAIR_DOWN?'STAIRS ↓':'STAIRS ↑',px+ts/2,py-8);
+      ctx.restore();
+    }
+  };
+
+  function wrapWhenReady(){
+    if(typeof render==='function'&&!render.__coordStairWrapped){
+      const oldRender=render;
+      render=function(){
+        const r=oldRender.apply(this,arguments);
+        drawVibrantStairMarkers();
+        updateCoordHUD();
+        return r;
+      };
+      render.__coordStairWrapped=true;
+    }
+    if(typeof movePlayer==='function'&&!movePlayer.__coordWrapped){
+      const oldMove=movePlayer;
+      movePlayer=function(dx,dy){
+        const before=G&&G.yui?G.yui.x+','+G.yui.y:'';
+        const r=oldMove.apply(this,arguments);
+        const after=G&&G.yui?G.yui.x+','+G.yui.y:'';
+        if(before!==after){
+          updateCoordHUD();
+          if(typeof addLog==='function') addLog('Moved to X:'+G.yui.x+' Y:'+G.yui.y,'system');
+        }
+        return r;
+      };
+      movePlayer.__coordWrapped=true;
+    }
+    if(typeof updateUI==='function'&&!updateUI.__coordWrapped){
+      const oldUpdate=updateUI;
+      updateUI=function(){
+        const r=oldUpdate.apply(this,arguments);
+        updateCoordHUD();
+        return r;
+      };
+      updateUI.__coordWrapped=true;
+    }
+    if(window.TILE_COLOR){
+      TILE_COLOR[TILE.STAIR_DOWN]='#ff38ff';
+      TILE_COLOR[TILE.STAIR_UP]='#39ff88';
+    }
+    updateCoordHUD();
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',()=>setTimeout(wrapWhenReady,0));
+  }else{
+    setTimeout(wrapWhenReady,0);
+  }
+  setTimeout(wrapWhenReady,500);
+})();
+
+
+// ============================================================
+// GUARANTEED COORDINATE SYNC PATCH
+// Keeps the crab X/Y HUD updated even when movement is wrapped
+// by later floor, stair, particle, mobile, or battle patches.
+// ============================================================
+(function(){
+  let lastCoordText='';
+
+  function ensureLiveCoordHud(){
+    let value=document.getElementById('coord-value');
+    if(value) return value;
+
+    const center=document.getElementById('center') || document.getElementById('game-container') || document.body;
+    const hud=document.createElement('div');
+    hud.id='coord-hud';
+    hud.setAttribute('aria-live','polite');
+    hud.innerHTML='<span class="coord-label">POS</span> <span class="coord-value" id="coord-value">X:0 Y:0</span>';
+    center.appendChild(hud);
+    return document.getElementById('coord-value');
+  }
+
+  function readCoord(){
+    if(typeof G==='undefined' || !G || !G.yui) return null;
+    return {x:G.yui.x, y:G.yui.y};
+  }
+
+  window.forceUpdateCrabCoordinates=function(){
+    const pos=readCoord();
+    if(!pos) return;
+    const text='X:'+pos.x+' Y:'+pos.y;
+    const value=ensureLiveCoordHud();
+    if(value) value.textContent=text;
+
+    const mobileLoc=document.getElementById('m-loc-name');
+    if(mobileLoc){
+      const zone=G.currentZone || 'World';
+      mobileLoc.textContent=zone+' · '+text;
+    }
+
+    lastCoordText=text;
+  };
+
+  // Wrap movement at the very end so every successful tile step updates instantly.
+  function installCoordMoveHook(){
+    if(typeof movePlayer!=='function' || movePlayer.__alwaysCoordHooked) return;
+    const previousMovePlayer=movePlayer;
+    movePlayer=function(dx,dy){
+      const before=readCoord();
+      const result=previousMovePlayer.apply(this,arguments);
+      const after=readCoord();
+      if(after && (!before || before.x!==after.x || before.y!==after.y)){
+        window.forceUpdateCrabCoordinates();
+      }else{
+        // Still refresh after blocked movement, stair triggers, or UI-only state changes.
+        window.forceUpdateCrabCoordinates();
+      }
+      return result;
+    };
+    movePlayer.__alwaysCoordHooked=true;
+  }
+
+  function tick(){
+    installCoordMoveHook();
+    const pos=readCoord();
+    if(pos){
+      const text='X:'+pos.x+' Y:'+pos.y;
+      if(text!==lastCoordText) window.forceUpdateCrabCoordinates();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',()=>{
+      installCoordMoveHook();
+      window.forceUpdateCrabCoordinates();
+      requestAnimationFrame(tick);
+    });
+  }else{
+    installCoordMoveHook();
+    window.forceUpdateCrabCoordinates();
+    requestAnimationFrame(tick);
   }
 })();
 
